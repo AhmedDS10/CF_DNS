@@ -10,6 +10,7 @@ CF_API_TOKEN="your_cloudflare_api_token_here"
 CF_ZONE_ID="your_zone_id_here"
 CF_RECORD_NAME="subdomain.example.com"  # The DNS record to update
 CHECK_INTERVAL=300  # Check every 5 minutes (in seconds)
+CF_PROXY_ENABLED=true  # Enable Cloudflare proxy (orange cloud)
 
 # Files
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,13 +90,15 @@ update_dns_record() {
     
     # Extract record details
     local record_type=$(echo "$record_data" | grep -o '"type":"[^"]*"' | head -1 | cut -d'"' -f4)
-    local proxied=$(echo "$record_data" | grep -o '"proxied":[^,}]*' | head -1 | cut -d':' -f2)
     local ttl=$(echo "$record_data" | grep -o '"ttl":[^,}]*' | head -1 | cut -d':' -f2)
     
     # Default values if not found
     [[ -z "$record_type" ]] && record_type="A"
-    [[ -z "$proxied" ]] && proxied="false"
     [[ -z "$ttl" ]] && ttl="1"
+    
+    # Use configured proxy setting
+    local proxied_value="true"
+    [[ "$CF_PROXY_ENABLED" == false ]] && proxied_value="false"
     
     local update_data=$(cat <<EOF
 {
@@ -103,7 +106,7 @@ update_dns_record() {
     "name": "$CF_RECORD_NAME",
     "content": "$new_ip",
     "ttl": $ttl,
-    "proxied": $proxied
+    "proxied": $proxied_value
 }
 EOF
 )
@@ -164,7 +167,7 @@ check_and_update() {
     local update_success=$(echo "$update_response" | grep -o '"success":[^,]*' | cut -d':' -f2)
     if [[ "$update_success" == "true" ]]; then
         log_success "DNS record updated successfully!"
-        log_success "$CF_RECORD_NAME → $current_ip"
+        log_success "$CF_RECORD_NAME → $current_ip (Proxied: $CF_PROXY_ENABLED)"
         save_cached_ip "$current_ip"
         return 0
     else
@@ -230,6 +233,7 @@ status_daemon() {
         echo "Service is running (PID: $pid)"
         echo "Monitoring: $CF_RECORD_NAME"
         echo "Check interval: $CHECK_INTERVAL seconds"
+        echo "Proxy enabled: $CF_PROXY_ENABLED"
         echo "Log file: $LOG_FILE"
         if [[ -f "$IP_CACHE_FILE" ]]; then
             echo "Last known IP: $(cat $IP_CACHE_FILE)"
@@ -247,6 +251,7 @@ monitor_loop() {
     log "=========================================="
     log "Monitoring: $CF_RECORD_NAME"
     log "Check interval: $CHECK_INTERVAL seconds"
+    log "Proxy enabled: $CF_PROXY_ENABLED"
     log "=========================================="
     
     while true; do
